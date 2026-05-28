@@ -1,5 +1,17 @@
-# Maven Fuzzy Factory — E-Commerce Traffic & Funnel Analytics Dashboard
+# Maven Fuzzy Factory — E-Commerce Traffic & Funnel Analytics
 
+![Snowflake](https://img.shields.io/badge/Snowflake-29B5E8?style=for-the-badge&logo=snowflake&logoColor=white)
+![Power BI](https://img.shields.io/badge/Power%20BI-F2C811?style=for-the-badge&logo=powerbi&logoColor=black)
+![SQL](https://img.shields.io/badge/SQL-4479A1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Completed-brightgreen?style=for-the-badge)
+
+---
+
+## 🔗 Live Dashboard
+
+> **[View Interactive Dashboard on Power BI Service →](https://app.powerbi.com/view?r=eyJrIjoiZGE5MTFjYWItMWE3My00NWM2LTgxY2UtMWM5MGYxYjFmZmEzIiwidCI6ImJlODMyOWE3LTcyMTgtNDlhMy05YWMxLWQ3Yjk1NDU2M2YzOSIsImMiOjEwfQ%3D%3D)**
+>
+> No Power BI account or installation required — opens directly in your browser.
 
 ---
 
@@ -18,7 +30,19 @@
 
 ## Introduction
 
-Maven Fuzzy Factory is a fictional e-commerce company used as a learning dataset by Maven Analytics. This project presents an end-to-end **business intelligence dashboard** built in Power BI, designed to give stakeholders a clear, interactive view of website traffic performance and customer conversion behaviour across the period **March 2012 – April 2015**.
+Maven Fuzzy Factory is a fictional e-commerce company used as a learning dataset by Maven Analytics. This project presents a **full end-to-end analytics pipeline** — from raw CSV data ingested into Snowflake, through a star schema transformation layer, to an interactive Power BI dashboard — designed to give stakeholders a clear view of website traffic performance and customer conversion behaviour across the period **March 2012 – April 2015**.
+
+### Project Architecture
+
+```
+CSV Source Files
+      ↓
+Snowflake (RAW_DB)         — raw ingestion layer
+      ↓
+Snowflake (ANALYTICS_DB)   — star schema transformation layer
+      ↓
+Power BI                   — semantic model + interactive dashboard
+```
 
 The dashboard is structured across four report pages — **Traffic Overview**, **Traffic Analytics**, **Funnel Overview**, and **Funnel Analytics** — enabling both high-level monitoring and deep-dive analysis of how users discover, engage with, and convert through the Maven Fuzzy Factory website.
 
@@ -58,146 +82,198 @@ Maven Fuzzy Factory's marketing and product teams need a centralised reporting s
 
 ## Skills Demonstrated
 
-- **Data modelling** — star schema design with fact and dimension tables in Power BI
-- **DAX (Data Analysis Expressions)** — calculated columns, measures, KPIs including MoM % change, PY comparisons, conversion rates, bounce rates, and engagement metrics
-- **Power Query (M Language)** — data cleaning, transformation, and table joins
-- **Data visualisation design** — multi-page interactive report with consistent branding, slicers, cross-filtering, and drill-through capability
-- **UX & report layout** — intuitive navigation with a sidebar menu, date range pickers, and conditional formatting
-- **Business intelligence storytelling** — translating raw transactional data into actionable marketing and funnel insights
+**Snowflake & SQL**
+- Two-layer database architecture (`RAW_DB` → `ANALYTICS_DB`) separating ingestion from analytics
+- Snowflake-native `GENERATOR` function for building a static date spine — zero dependency on fact tables
+- Window functions for analytical computation at the database layer
+- Business logic embedded in SQL — traffic source classification and funnel stage mapping via `CASE` statements
+- Structured data quality checks — row counts, duplicate detection, null validation, date range verification
+
+**Power BI**
+- Star schema semantic model with fact and dimension tables
+- DAX measures including KPIs, MoM % change, PY comparisons, conversion rates, bounce rates, and engagement metrics
+- Power Query (M Language) for data connection, column selection, and static dimension table generation
+- Multi-page interactive report with consistent branding, slicers, cross-filtering, and drill-through capability
+- Intuitive navigation with sidebar menu, date range pickers, and conditional formatting
 
 ---
 
 ## Data Sourcing
 
 - **Source:** [Maven Analytics – E-Commerce Dataset](https://app.mavenanalytics.io/datasets?search=e-commerce)
-- **Format:** CSV files
+- **Format:** CSV files (6 tables)
 - **Coverage:** March 2012 – April 2015
 
-### Tables Included
+### Raw Tables (`RAW_DB.PUBLIC`)
 
 | Table | Rows | Description |
 |---|---|---|
-| `orders` | 32,313 | Order-level records with revenue and COGS |
-| `order_items` | 40,025 | Line items per order including product and price |
-| `order_item_refunds` | 1,731 | Refund records linked to order items |
-| `products` | 4 | Product dimension with names and creation dates |
-| `website_sessions` | — | Session-level data with traffic source, device type, UTM parameters |
-| `website_pageviews` | — | Pageview-level data per session |
+| `ORDERS` | 32,313 | Order-level records with revenue and COGS |
+| `ORDER_ITEMS` | 40,025 | Line items per order including product and price |
+| `ORDER_ITEM_REFUNDS` | 1,731 | Refund records linked to order items |
+| `PRODUCTS` | 4 | Product dimension with names and creation dates |
+| `WEBSITE_SESSIONS` | 472,871 | Session-level data with traffic source, device type, UTM parameters |
+| `WEBSITE_PAGEVIEWS` | ~1,188,124 | Pageview-level data per session |
+
+### A Note on Null Values in the Dataset
+
+The `UTM_CAMPAIGN`, `UTM_SOURCE`, and `UTM_CONTENT` fields contain null values for a significant portion of sessions. **This is expected and correct behaviour** — not a data quality issue.
+
+UTM parameters only exist for **paid traffic**, where a marketer deliberately tags a URL before launching a campaign. Sessions arriving through organic search or direct navigation carry no UTM parameters by design:
+
+| Traffic Type | UTM_CAMPAIGN | Reason |
+|---|---|---|
+| `paid_gsearch` | populated | Marketer-tagged paid Google Search URLs |
+| `paid_bsearch` | populated | Marketer-tagged paid Bing Search URLs |
+| `paid_social` | populated | Marketer-tagged paid social URLs |
+| `organic_search` | **null** | Google/Bing organic clicks do not carry UTM parameters |
+| `direct` | **null** | Users typed the URL directly — no tracking exists |
+
+In the transformation layer, these nulls are handled by a `CASE` statement in `FACT_WEBSITE_SESSIONS` that classifies each session into a clean `TRAFFIC_SOURCE_TYPE` label based on the combination of `UTM_SOURCE`, `UTM_CAMPAIGN`, and `HTTP_REFERER` — eliminating null values entirely at the reporting layer.
 
 ---
 
 ## Data Transformation
 
-All transformations were performed in **Power Query** within Power BI before loading into the data model. Key steps included:
+All transformations are performed in Snowflake using three structured SQL scripts before any data enters Power BI.
 
-- **Data type standardisation** — ensuring date, integer, and decimal types were correctly assigned across all tables
-- **Null handling** — addressing missing UTM fields (campaign, source, content) for direct and organic traffic sessions
-- **Derived columns** — extracting `SESSION_DATE`, `Session Hour`, and `hour_period` from raw datetime fields
-- **Traffic source classification** — creating a clean `Traffic Source Type` label by combining UTM source and medium fields into human-readable categories (e.g. `paid_gsearch`, `organic_search`, `direct`, `paid_social`)
-- **Session type flag** — deriving `IS_REPEAT_SESSION` to distinguish new vs. returning visitors
-- **Funnel stage mapping** — joining pageview URL data to a `FunnelStages` reference table to assign each pageview a stage label and step order
-- **Date dimension** — building a `DIM_DATE` table with full calendar attributes (day name, month number, quarter, year, `YearMonthDate`) to support time intelligence calculations
-- **Hour dimension** — building a `DIM_HOUR` table with `hour`, `hour_num`, and `hour_period` for intraday analysis
+### File 1 — `e-commerce_setup.sql` (One-time environment setup)
+
+- Creates `RAW_WAREHOUSE` (X-Small, auto-suspend 60s) for cost-efficient compute
+- Creates two databases: `RAW_DB` (ingestion layer) and `ANALYTICS_DB` (analytics layer)
+- Defines two CSV file formats — `CSV_CRLF` for Windows line endings and `CSV_LF` for Unix line endings with quoted fields
+- Creates a single internal staging area `@STG_RAW` to hold all 6 source CSV files
+
+### File 2 — `e-commerce_raw_tables.sql` (Ingestion + data quality)
+
+- Creates 6 raw tables as exact mirrors of source CSV structure — no transformations applied
+- Loads data via `COPY INTO` with `FORCE = TRUE` to ensure clean reloads
+- Runs comprehensive data quality checks:
+  - Row counts across all 6 tables
+  - Duplicate detection on all primary keys
+  - Null checks on all critical foreign keys
+  - Expected null analysis on UTM fields (documented above)
+  - Date range validation
+
+### File 3 — `e-commerce_normalisation.sql` (Star schema build)
+
+Key transformations applied:
+
+**DIM_DATE — Snowflake-native date spine**
+Instead of scanning and UNIONing all fact tables to derive dates (which is resource-wasteful), `DIM_DATE` is generated using Snowflake's `GENERATOR` function — producing a complete date spine from 2012-01-01 to 2016-12-31 instantly with zero database reads. Includes `DAY_SORT_ORDER` and `IS_WEEKEND` for enhanced time intelligence.
+
+**FACT_WEBSITE_SESSIONS — Traffic source classification**
+Business logic embedded directly in SQL using a `CASE` statement on `UTM_SOURCE`, `UTM_CAMPAIGN`, and `HTTP_REFERER` to produce a clean `TRAFFIC_SOURCE_TYPE` column:
+- `paid_gsearch` — Google paid search
+- `paid_bsearch` — Bing paid search
+- `paid_social` — Paid social (socialbook)
+- `organic_search` — Referral from search engine without UTM
+- `direct` — No source, no referrer
+
+**FACT_PAGEVIEWS — Window functions for pageview ranking**
+`PAGE_ORDER` and `IS_FIRST_PAGEVIEW` are computed using `ROW_NUMBER() OVER (PARTITION BY website_session_id ORDER BY created_at ASC)` directly in Snowflake. This replaces equivalent DAX calculated columns in Power BI which would create O(N²) row-context loops across 1M+ rows — causing significant performance degradation.
+
+**Profit calculations**
+`order_profit_usd` and `item_profit_usd` are computed as `price_usd - cogs_usd` at the SQL layer, keeping DAX measures simple.
 
 ---
 
 ## Modelling
 
-The data model follows a **star schema** design, with fact tables at the centre connected to supporting dimension tables via defined relationships.
+The Power BI semantic model follows a **star schema** design, with `FACT_WEBSITE_SESSIONS` as the central hub connecting to all other tables.
+
+![Data Model](assets/data-model/data-model.png)
 
 ### Fact Tables
-- `FACT_WEBSITE_SESSIONS` — one row per session with traffic source, device, and user attributes
-- `FACT_PAGEVIEWS` — one row per pageview linked to sessions
-- `FACT_ORDERS` — one row per order with revenue, COGS, and product info
-- `FACT_ORDER_ITEMS` — one row per order line item
-- `FACT_REFUNDS` — one row per refund transaction
+| Table | Rows | Description |
+|---|---|---|
+| `FACT_WEBSITE_SESSIONS` | 472,871 | One row per session — central hub of the model |
+| `FACT_PAGEVIEWS` | ~1,188,124 | One row per pageview with funnel stage and page order |
+| `FACT_ORDERS` | 32,313 | One row per order with revenue and profit |
+| `FACT_ORDER_ITEMS` | 40,025 | One row per order line item |
+| `FACT_REFUNDS` | 1,731 | One row per refund transaction |
 
 ### Dimension Tables
-- `DIM_DATE` — full date dimension for time intelligence
-- `DIM_HOUR` — intraday hour groupings
-- `DIM_PRODUCT` — product lookup table
-- `Session_Legend` — maps `IS_REPEAT_SESSION` flag to `Session_Type` label
-- `FunnelStages` — defines ordered funnel stages and URL filters
-- `LanderStages` — maps landing page URLs to display labels
-- `Day_Sort` / `Hour_Sort` — sort-order tables for correct day and hour sequencing in visuals
+| Table | Description |
+|---|---|
+| `DIM_DATE` | Full date spine 2012–2016 with day/month/quarter attributes and sort order |
+| `DIM_HOUR` | 24-row static table with hour period labels and sort order |
+| `DIM_PRODUCT` | Product lookup with names and creation dates |
+| `Session_Legend` | Maps `IS_REPEAT_SESSION` flag to New/Repeat Session label |
+| `FunnelStages` | Ordered funnel stage definitions with URL filters |
+| `LanderStages` | Maps landing page URLs to display labels |
 
 ### Key Relationships
-- Sessions → Date (many-to-one on `SESSION_DATE`)
-- Sessions → Hour (many-to-one on `hour_period`)
-- Pageviews → Sessions (many-to-one on `WEBSITE_SESSION_ID`)
-- Orders → Sessions (many-to-one on `WEBSITE_SESSION_ID`)
-- Order Items → Orders (many-to-one on `ORDER_ID`)
-- Order Items → Products (many-to-one on `PRODUCT_ID`)
-- Refunds → Order Items (many-to-one on `ORDER_ITEM_ID`)
+- `DIM_DATE` (1) → `FACT_WEBSITE_SESSIONS` (*) on `SESSION_DATE`
+- `FACT_WEBSITE_SESSIONS` (1) → `FACT_ORDERS` (*) on `WEBSITE_SESSION_ID`
+- `FACT_WEBSITE_SESSIONS` (1) → `FACT_PAGEVIEWS` (*) on `WEBSITE_SESSION_ID`
+- `FACT_ORDERS` (1) → `FACT_ORDER_ITEMS` (*) on `ORDER_ID`
+- `DIM_PRODUCT` (1) → `FACT_ORDER_ITEMS` (*) on `PRODUCT_ID`
+- `DIM_HOUR` (1) → `FACT_WEBSITE_SESSIONS` (*) on `hour_period`
+
+> **Important:** `FACT_WEBSITE_SESSIONS` sits on the **One** side of its relationship with `FACT_ORDERS`. This ensures date and traffic source filters correctly propagate from sessions into orders, enabling accurate time-based conversion rate calculations.
 
 ---
 
 ## Analysis & Visualisation
 
-The report is structured across **four pages**, each targeting a specific area of business performance.
-
----
-
 ### Page 1 — Traffic Overview
 
-**Purpose:** High-level summary of website session volume and traffic composition over time.
+![Traffic Overview](assets/screenshots/traffic-overview.png)
 
-**Key Metrics (KPI Cards):**
-- Total Sessions, New Sessions, Repeat Sessions — each with Prior Year (PY) and Month-over-Month (MoM) comparisons
-- Mobile Sessions, Paid Search %, Total Users
+High-level summary of website session volume and traffic composition over time.
+
+**KPI Cards:** Total Sessions, New Sessions, Repeat Sessions, Mobile Sessions, Paid Search %, Total Users — each with Prior Year (PY) and Month-over-Month (MoM) comparisons.
 
 **Visuals:**
-- **Donut chart** — Total Sessions split by device type (Desktop vs. Mobile)
-- **Line chart** — Total Sessions by Month and Traffic Source Type, showing channel growth trends from 2012 to 2015
-- **Stacked bar chart** — Total Sessions by Month and Session Type (New vs. Repeat)
-- **Bar chart** — Total Sessions by Traffic Source (absolute volume comparison)
-
-**Filters:** Date range pickers, Traffic Source slicer, Campaign slicer
+- Donut chart — Total Sessions split by device type (Desktop vs. Mobile)
+- Line chart — Total Sessions by Month and Traffic Source Type
+- Stacked bar chart — Total Sessions by Month and Session Type (New vs. Repeat)
+- Bar chart — Total Sessions by Traffic Source (absolute volume)
 
 ---
 
 ### Page 2 — Traffic Analytics
 
-**Purpose:** Deep-dive into traffic quality and engagement by source.
+![Traffic Analytics](assets/screenshots/traffic-analytics.png)
 
-**Key Metrics (KPI Cards):** Same top-row KPIs as Traffic Overview for consistent context.
+Deep-dive into traffic quality and engagement by source.
 
 **Visuals:**
-- **Summary table** — Traffic Source Type × Total Sessions, Engaged Sessions, Engagement Rate, Avg Time per Session, Event per Session (with conditional formatting on Engaged Sessions)
-- **Horizontal bar chart** — New Session Breakdown by Traffic Source (% of sessions that are new visitors)
-- **Heat map / matrix** — Traffic Source Distribution Across Months (session counts by source × month number)
+- Summary table — Traffic Source Type × Total Sessions, Engaged Sessions, Engagement Rate, Avg Time per Session, Events per Session (with conditional formatting)
+- Horizontal bar chart — New Session % by Traffic Source
+- Heat map matrix — Traffic Source Distribution Across Months
 
 ---
 
 ### Page 3 — Funnel Overview
 
-**Purpose:** Understand how sessions progress through the purchase funnel and where drop-off occurs.
+![Funnel Overview](assets/screenshots/funnel-overview.png)
 
-**Key Metrics (KPI Cards):**
-- Overall Conversion Rate, Bounce Rate — with PY and MoM comparisons
-- Desktop CVR, Mobile CVR
+Understand how sessions progress through the purchase funnel and where drop-off occurs.
+
+**KPI Cards:** Conversion Rate, Bounce Rate, Desktop CVR, Mobile CVR — with PY and MoM comparisons.
 
 **Visuals:**
-- **Funnel bar chart** — Funnel Sessions Dynamic by Stage Label (Entry → Product Page → Cart → Shipping → Billing → Converted), showing absolute session counts and an overall 6.8% conversion rate
-- **Line chart** — Conversion Rate over Time by device type (Desktop vs. Mobile), indexed by month
-- **Horizontal bar chart** — Conversion Rate by Traffic Source Type
-- **Horizontal bar chart** — Bounce Rate by Traffic Source Type
-- **Horizontal bar chart** — Conversion Rate by Entry Page (Home, Lander 1–5)
+- Funnel bar chart — Entry → Product Page → Cart → Shipping → Billing → Converted (overall 6.83% CVR)
+- Line chart — Conversion Rate over Time by device type (Desktop vs. Mobile)
+- Bar charts — Conversion Rate and Bounce Rate by Traffic Source Type
+- Bar chart — Conversion Rate by Entry Page (Home, Lander 1–5)
 
 ---
 
 ### Page 4 — Funnel Analytics
 
-**Purpose:** Granular analysis of conversion behaviour by time, day, traffic source, and device.
+![Funnel Analytics](assets/screenshots/funnel-analytics.png)
 
-**Key Metrics (KPI Cards):** Conversion Rate, Bounce Rate, Desktop CVR, Mobile CVR (consistent with Funnel Overview).
+Granular analysis of conversion behaviour by time, day, traffic source, and device.
 
 **Visuals:**
-- **Combo chart** — Conversion Rate by Hour Period (Early Morning, Morning, Afternoon, Evening, Night, Late Night) with session volume as bars and CVR as a line
-- **Funnel completion table** — Stage-by-stage drop-off rates (%) broken down by Traffic Source Type
-- **Day-of-week table** — Day × New Session %, Total Sessions, Conversion Rate
-- **Clustered bar chart** — Avg Page Views: Converted vs. Non-Converted users
-- **Matrix** — Traffic Source × Device Type Conversion Rate cross-tab
+- Combo chart — Conversion Rate by Hour Period with session volume bars
+- Funnel completion table — Stage-by-stage drop-off rates by Traffic Source Type
+- Daily Performance Summary — Day × New Session %, Total Sessions, Conversion Rate
+- Clustered bar chart — Avg Page Views: Converted vs. Non-Converted
+- Matrix — Traffic Source × Device Type Conversion Rate cross-tab
 
 ---
 
@@ -205,23 +281,45 @@ The report is structured across **four pages**, each targeting a specific area o
 
 ### Key Findings
 
-- **Paid Google Search dominates traffic** — accounting for 316K of 473K total sessions (~67%), making it the most critical channel to optimise and protect.
-- **Mobile is a significant and growing segment** — representing 146K sessions (31% of total), yet Mobile CVR (3.09%) is substantially lower than Desktop CVR (8.50%), signalling a user experience gap.
-- **Paid Social has the lowest conversion rate** (3.21%) and highest bounce rate (77.63%), suggesting sessions from this source are largely unqualified or the landing experience is poorly matched to intent.
-- **Organic search delivers the highest conversion rate** (7.51%) and one of the highest engagement rates (60.77%), indicating strong purchase intent among these visitors.
-- **The biggest funnel drop-off occurs between Entry and Product Page** — only 55% of sessions reach the product page — presenting the largest single opportunity to improve top-of-funnel engagement.
-- **Lander 5 outperforms all other landing pages** with a 10.17% conversion rate, compared to just 3.39% for Lander 3, suggesting that landing page content and design have a material impact on downstream conversion.
-- **Afternoon is the peak traffic period**, while conversion rate remains relatively stable across most hour periods (~6.8–6.9%), indicating time-of-day targeting adjustments may have limited impact.
+- **Paid Google Search dominates traffic** — 316K of 473K total sessions (~67%), making it the most critical channel to optimise and protect
+- **Mobile is a significant segment** — 146K sessions (31% of total), yet Mobile CVR (3.09%) is less than half of Desktop CVR (8.50%), signalling a UX gap
+- **Paid Social has the lowest conversion rate** (3.21%) and highest bounce rate (77.63%), suggesting sessions from this source are largely unqualified
+- **Organic search delivers the highest conversion rate** (7.51%) and strong engagement (60.77%), indicating strong purchase intent
+- **Biggest funnel drop-off is Entry → Product Page** — only 55% of sessions reach the product page — the largest single improvement opportunity
+- **Lander 5 outperforms all other landing pages** at 10.17% CVR vs. 3.39% for Lander 3, confirming landing page content materially impacts conversion
+- **Afternoon is peak traffic period** with 155K sessions, while conversion rate stays stable (~6.8–6.9%) across hour periods
 
 ### Recommendations
 
-1. **Improve mobile experience** — prioritise mobile UX optimisation across the product page, cart, and checkout flow to close the desktop-mobile CVR gap.
-2. **Reduce paid social spend or refine targeting** — the high bounce rate and low CVR from paid social suggests either audience misalignment or a weak landing page match; test dedicated social landing pages before scaling spend.
-3. **Scale what works from organic search** — analyse the content, keywords, and landing pages driving organic conversions and replicate those patterns in paid campaigns.
-4. **A/B test product page entry experience** — given the steep drop from Entry to Product Page, test above-the-fold content, page load speed, and calls to action.
-5. **Replicate Lander 5's design across other entry pages** — with the highest CVR (10.17%), Lander 5's layout and messaging should inform the redesign of lower-performing landers.
-6. **Monitor repeat session growth** — as repeat sessions grow from nearly zero in 2012 to a meaningful share by 2015, invest in retention-focused campaigns and personalisation to further improve lifetime value.
+1. **Improve mobile experience** — prioritise mobile UX optimisation across product page, cart, and checkout to close the desktop–mobile CVR gap
+2. **Reduce paid social spend or refine targeting** — the high bounce rate and low CVR suggest audience misalignment; test dedicated social landing pages before scaling spend
+3. **Scale what works in organic search** — analyse content, keywords, and landing pages driving organic conversions and replicate in paid campaigns
+4. **A/B test the product page entry experience** — given the steep Entry → Product Page drop, test above-the-fold content, load speed, and calls to action
+5. **Replicate Lander 5's design** — with the highest CVR (10.17%), its layout and messaging should inform redesigns of lower-performing landers
+6. **Monitor repeat session growth** — invest in retention-focused campaigns and personalisation to improve lifetime value as the repeat visitor base grows
 
 ---
 
-*Dashboard built with Power BI Desktop | Data sourced from [Maven Analytics](https://app.mavenanalytics.io/datasets?search=e-commerce)*
+## Repository Structure
+
+```
+maven-fuzzy-factory/
+│
+├── sql/
+│   ├── e-commerce_setup.sql          # Warehouse, databases, schemas, file formats, stage
+│   ├── e-commerce_raw_tables.sql     # Raw table creation, CSV ingestion, data quality checks
+│   └── e-commerce_normalisation.sql  # Star schema transformation with window functions
+│
+├── assets/
+│   ├── screenshots/                  # Dashboard page screenshots
+│   └── data-model/                   # Power BI data model diagram
+│
+├── data/                             # Source CSV files and data dictionary
+├── MavenFuzzyFactory.pbix            # Power BI Desktop source file (requires Power BI Desktop)
+└── README.md
+```
+
+---
+
+*End-to-end analytics pipeline: Snowflake (data engineering) → Power BI (business intelligence)*  
+*Data sourced from [Maven Analytics](https://app.mavenanalytics.io/datasets?search=e-commerce)*
